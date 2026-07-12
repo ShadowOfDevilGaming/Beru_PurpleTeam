@@ -43,14 +43,24 @@ jobs:
           pip install "Cython==0.29.36"
           pip install buildozer
 
-      # Clean slate cache version to avoid previous zipped errors
       - name: Cache Buildozer Global Store
         uses: actions/cache@v4
         with:
           path: ~/.buildozer
-          key: buildozer-global-${{ hashFiles('buildozer.spec') }}-v5
+          key: buildozer-global-${{ hashFiles('buildozer.spec') }}-v6
 
-      # Directly pointing to GitHub's pre-installed Android tools
+      # Shadow Master Path Patch: Modern SDK Tools manager fallback link
+      - name: Patch Android SDK Manager Path
+        run: |
+          sudo mkdir -p /usr/local/lib/android/sdk/tools/bin
+          if [ -f "/usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager" ]; then
+            sudo ln -sf /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager /usr/local/lib/android/sdk/tools/bin/sdkmanager
+            echo "Patched using cmdline-tools/latest"
+          elif [ -f "/usr/local/lib/android/sdk/cmdline-tools/11.0/bin/sdkmanager" ]; then
+            sudo ln -sf /usr/local/lib/android/sdk/cmdline-tools/11.0/bin/sdkmanager /usr/local/lib/android/sdk/tools/bin/sdkmanager
+            echo "Patched using cmdline-tools/11.0"
+          fi
+
       - name: Build Android Debug APK
         run: |
           export ANDROID_NDK_HOME=/usr/local/lib/android/sdk/ndk/27.3.13750724
@@ -67,7 +77,6 @@ jobs:
             exit 1
           fi
           echo "path=$APK" >> "$GITHUB_OUTPUT"
-          echo "Found APK: $APK"
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
