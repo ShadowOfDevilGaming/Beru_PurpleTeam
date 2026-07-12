@@ -1,0 +1,145 @@
+# Build the Beru AI debug APK on every push / tag, and on manual trigger.
+# Download the artifact "BeruAI-apk" from the Actions run page.
+#
+# Notes:
+#  * Uses buildx-free, plain ubuntu runner + buildozer.
+#  * Caches the Android SDK/NDK and buildozer's global store so rebuilds after
+#    the first take minutes, not ~40.
+#  * First run downloads the SDK/NDK (~5-8 GB) and takes ~25-40 min.
+#  * Pin Cython to 0.29.36 -- Kivy 2.3 is incompatible with Cython 3.x.
+
+name: Build Android APK
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+    paths:
+      - 'main.py'
+      - 'openrouter_client.py'
+      - 'buildozer.spec'
+      - 'shadow_memory.json'
+      - '.github/workflows/build-apk.yml'
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch: # manual "Run workflow" button in the Actions tab
+
+# Cancel a superseded run on the same ref.
+concurrency:
+  group: apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: buildozer android debug
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            autoconf automake libtool pkg-config \
+            zlib1g-dev libncurses5-dev libncursesw5-dev \
+            libffi-dev libssl-dev \
+            build-essential ccache git unzip \
+            openjdk-17-jdk
+          echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> "$GITHUB_ENV"
+          echo "/usr/lib/jvm/java-17-openjdk-amd64/bin" >> "$GITHUB_PATH"
+
+      - name: Install buildozer (pinned Cython)
+        run: |
+          python -m pip install --upgrade pip wheel
+          pip install "Cython==0.29.36"
+          pip install buildozer
+
+      # ---- Caches -----------------------------------------------------------
+      # buildozer's global store (SDK, NDK, p4a clone). Key bumps when the spec
+      # requirements or p4a branch change so a stale cache never breaks a build.
+      - name: Cache buildozer global store (~/.buildozer)
+        uses: actions/cache@v4
+        with:
+          path: ~/.buildozer
+          key: buildozer-global-${{ hashFiles('buildozer.spec') }}-v1
+          restore-keys: |
+            buildozer-global-
+
+      - name: Cache project .buildozer dir
+        uses: actions/cache@v4
+        with:
+          path: .buildozer
+          key: buildozer-project-${{ hashFiles('buildozer.spec', 'main.py', 'openrouter_client.py') }}-v1
+          restore-keys: |
+            buildozer-project-
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-3.11-${{ hashFiles('buildozer.spec') }}
+
+      # ---- Build ------------------------------------------------------------
+      - name: Accept Android SDK licenses (best-effort)
+        run: buildozer android accept_sdk_license || true
+
+      - name: Build debug APK
+        run: buildozer -v android debug
+
+      # ---- Publish ----------------------------------------------------------
+      - name: Locate APK
+        id: apk
+        run: |
+          set -e
+          APK=$(find bin -maxdepth 1 -name '*.apk' | head -1)
+          if [ -z "$APK" ]; then
+            echo "::error::No APK produced in bin/"
+            ls -la bin || true
+            exit 1
+          fi
+          echo "path=$APK" >> "$GITHUB_OUTPUT"
+          echo "Found APK: $APK"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BeruAI-apk
+          path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error
+          retention-days: 30
+
+      # Attach the APK to a GitHub Release automatically when you push a v* tag.
+      - name: Attach APK to Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.apk.outputs.path }}
+          generate_release_notes: true
+
+      # ---- Diagnostics on failure ------------------------------------------
+      - name: Dump buildozer logs on failure
+        if: failure()
+        run: |
+          echo "=== .buildozer/android/platform ==="
+          ls -la .buildozer/android/platform/ 2>/dev/null || true
+          echo "=== last log ==="
+          find . -name '*.log' -newer buildozer.spec -exec tail -n 50 {} \; 2>/dev/null || true
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BeruAI-build-logs
+          path: |
+            .buildozer/**/*.log
+            /tmp/*.log
+          if-no-files-found: ignore
+          retention-days: 7

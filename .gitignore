@@ -1,0 +1,20 @@
+# Buildozer / python-for-android
+.buildozer/
+bin/
+.build/
+*.apk
+*.aab
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.env
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+
+# Local runtime vault mutations (schema stays in repo as a seed)
+shadow_memory.json.tmp

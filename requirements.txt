@@ -1,0 +1,5 @@
+# Python dependencies for running Beru AI on desktop (for development/testing).
+# The Android APK build does NOT use this file -- it uses the `requirements`
+# line in buildozer.spec, which lists only: python3,kivy==2.3.0
+
+kivy==2.3.0
