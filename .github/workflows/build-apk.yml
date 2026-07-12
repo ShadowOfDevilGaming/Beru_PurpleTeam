@@ -37,19 +37,20 @@ jobs:
           echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> "$GITHUB_ENV"
           echo "/usr/lib/jvm/java-17-openjdk-amd64/bin" >> "$GITHUB_PATH"
 
-      - name: Install Buildozer and Pinned Cython
+      - name: Install Buildozer and Modern Cython
         run: |
           python -m pip install --upgrade pip wheel setuptools
-          pip install "Cython==0.29.36"
+          pip install "Cython>=3.0.0"
           pip install buildozer
 
+      # Refresh cache to v7 to discard previous corrupt compilation states
       - name: Cache Buildozer Global Store
         uses: actions/cache@v4
         with:
           path: ~/.buildozer
-          key: buildozer-global-${{ hashFiles('buildozer.spec') }}-v6
+          key: buildozer-global-${{ hashFiles('buildozer.spec') }}-v7
 
-      # Shadow Master Path Patch: Modern SDK Tools manager fallback link
+      # Shadow Master Path Patch for Modern SDK Tools
       - name: Patch Android SDK Manager Path
         run: |
           sudo mkdir -p /usr/local/lib/android/sdk/tools/bin

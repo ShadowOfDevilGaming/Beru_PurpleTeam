@@ -11,8 +11,8 @@ source.exts = py,kv,atlas,json
 
 version = 1.0.0
 
-# Requirements: Pinned Kivy stack to ensure dynamic toolchain stability
-requirements = python3,kivy==2.3.0
+# Requirements: Pinned Kivy master branch via Git for modern NDK compatibility
+requirements = python3, git+https://github.com/kivy/kivy.git@master
 
 # Orientation / fullscreen on Android ------------------------------------------
 orientation = portrait
@@ -42,7 +42,6 @@ include = shadow_memory.json
 p4a.branch = master
 
 # --- FORCE SYSTEM PRE-INSTALLED NDK TARGET BY SHADOW MASTER ---
-# This bypasses the NDK download/unzip extraction error 9 completely
 android.ndk = 27.3.13750724
 android.sdk_path = /usr/local/lib/android/sdk
 android.ndk_path = /usr/local/lib/android/sdk/ndk/27.3.13750724
