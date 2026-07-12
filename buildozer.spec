@@ -46,10 +46,14 @@ android.wakelock = True
 include = shadow_memory.json
 
 # Build engine ---------------------------------------------------------------
-# p4a.branch = master auto-downloads NDK r28c (extraction fails on the runner).
-# Use the released p4a (pip-managed by buildozer) which respects the pinned
-# NDK below and builds the stable Python 3 recipe.
-p4a.branch =
+# p4a.branch must be a REAL tag:
+#   * empty -> buildozer runs `git clone -b ''` -> git error 128 (the previous
+#     failure we just hit).
+#   * master -> auto-downloads NDK r28c, whose zip extraction fails on the
+#     runner with "error code 9 / broken pipe".
+# Pin to the latest released tag instead. This p4a respects the NDK pinned
+# below and builds the stable Python 3 recipe.
+p4a.branch = v2026.05.09
 
 # --- Use the GitHub runner's PREINSTALLED NDK (no download) -------------------
 # The ubuntu runner ships NDK 27.3.13750724. Setting android.ndk + the full
