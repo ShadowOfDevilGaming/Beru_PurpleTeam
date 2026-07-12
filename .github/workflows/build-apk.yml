@@ -1,14 +1,42 @@
+# Build the Beru AI debug APK on every push / tag, and on manual trigger.
+# Download the artifact "BeruAI-apk" from the Actions run page.
+#
+# Design notes:
+#   * NDK: we reuse the runner's PREINSTALLED NDK 27.3 (no download). Earlier
+#     runs failed because p4a master auto-fetched NDK r28c, whose zip
+#     extraction dies with "error code 9 / broken pipe".
+#   * Toolchain: released Kivy 2.3.0 + Cython 0.29.36 (NOT master / Cython 3).
+#     This is the combination python-for-android actually tests.
+#   * We do NOT cache ~/.buildozer: a previous cache stored a corrupt NDK zip
+#     that poisoned every subsequent run. .buildozer (per-project) is cached
+#     but validated (re-extracted if the NDK dir is missing/incomplete).
+
 name: Build Android APK
 
 on:
   push:
     branches: [main, master]
     tags: ['v*']
-  workflow_dispatch:
+    paths:
+      - 'main.py'
+      - 'openrouter_client.py'
+      - 'buildozer.spec'
+      - 'shadow_memory.json'
+      - '.github/workflows/build-apk.yml'
+  workflow_dispatch: {}
 
 concurrency:
   group: apk-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  # Pin everything to the runner's preinstalled NDK so p4a never downloads one.
+  ANDROID_HOME: /usr/local/lib/android/sdk
+  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+  ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/27.3.13750724
+  ANDROID_NDK_ROOT: /usr/local/lib/android/sdk/ndk/27.3.13750724
+  NDK_VERSION: 27.3.13750724
+  JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
 
 jobs:
   build:
@@ -17,15 +45,15 @@ jobs:
     timeout-minutes: 90
 
     steps:
-      - name: Checkout Source Code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Stable Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Install System Build Dependencies
+      - name: Install system build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -34,54 +62,115 @@ jobs:
             libffi-dev libssl-dev \
             build-essential ccache git unzip \
             openjdk-17-jdk
-          echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> "$GITHUB_ENV"
-          echo "/usr/lib/jvm/java-17-openjdk-amd64/bin" >> "$GITHUB_PATH"
+          echo "$JAVA_HOME/bin" >> "$GITHUB_PATH"
 
-      - name: Install Buildozer and Modern Cython
+      - name: Install buildozer (pinned Cython)
         run: |
-          python -m pip install --upgrade pip wheel setuptools
-          pip install "Cython>=3.0.0"
+          python -m pip install --upgrade pip wheel
+          # Kivy 2.3.0 is incompatible with Cython 3.x — pin 0.29.36.
+          pip install "Cython==0.29.36"
           pip install buildozer
 
-      # Refresh cache to v7 to discard previous corrupt compilation states
-      - name: Cache Buildozer Global Store
-        uses: actions/cache@v4
-        with:
-          path: ~/.buildozer
-          key: buildozer-global-${{ hashFiles('buildozer.spec') }}-v7
-
-      # Shadow Master Path Patch for Modern SDK Tools
-      - name: Patch Android SDK Manager Path
+      # ---- Pre-flight: confirm the preinstalled NDK is intact -----------------
+      # If a previous run left a corrupt extraction, fail fast with a clear
+      # message instead of a confusing mid-compile zip error.
+      - name: Verify preinstalled NDK is usable
         run: |
-          sudo mkdir -p /usr/local/lib/android/sdk/tools/bin
-          if [ -f "/usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager" ]; then
-            sudo ln -sf /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager /usr/local/lib/android/sdk/tools/bin/sdkmanager
-            echo "Patched using cmdline-tools/latest"
-          elif [ -f "/usr/local/lib/android/sdk/cmdline-tools/11.0/bin/sdkmanager" ]; then
-            sudo ln -sf /usr/local/lib/android/sdk/cmdline-tools/11.0/bin/sdkmanager /usr/local/lib/android/sdk/tools/bin/sdkmanager
-            echo "Patched using cmdline-tools/11.0"
+          set -e
+          NDK="$ANDROID_NDK_HOME"
+          echo "NDK dir: $NDK"
+          test -d "$NDK" || { echo "::error::Preinstalled NDK not found at $NDK"; exit 1; }
+          CLANG="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
+          test -x "$CLANG" || { echo "::error::NDK clang missing — toolchain incomplete"; exit 1; }
+          echo "NDK clang OK:"
+          "$CLANG" --version | head -1
+          # Sanity: make sure p4a's target dir does not already hold a corrupt r28c.
+          if [ -d "$HOME/.buildozer/android/platform/android-ndk-r28c" ]; then
+            echo "Removing stale corrupt NDK r28c leftover"
+            rm -rf "$HOME/.buildozer/android/platform/android-ndk-r28c"
           fi
 
-      - name: Build Android Debug APK
-        run: |
-          export ANDROID_NDK_HOME=/usr/local/lib/android/sdk/ndk/27.3.13750724
-          export ANDROID_HOME=/usr/local/lib/android/sdk
-          yes | buildozer -v android debug
+      # ---- Per-project build cache (validated) -------------------------------
+      # Cache the compiled recipe output so rebuilds are fast, but verify it.
+      - name: Cache project .buildozer
+        uses: actions/cache@v4
+        with:
+          path: .buildozer
+          key: buildozer-proj-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}-v1
+          restore-keys: |
+            buildozer-proj-${{ runner.os }}-
 
-      - name: Locate Generated APK
+      - name: Invalidate cache if NDK artefact is corrupt
+        run: |
+          # If the cached build dir references a half-extracted NDK, wipe it.
+          if find .buildozer -path '*android-ndk-r28c*' -print -quit 2>/dev/null | grep -q .; then
+            echo "Found stale r28c reference in cache — clearing .buildozer"
+            rm -rf .buildozer
+          fi
+
+      - name: Patch legacy SDK tools path (best-effort)
+        run: |
+          sudo mkdir -p /usr/local/lib/android/sdk/tools/bin
+          for d in cmdline-tools/latest cmdline-tools/11.0 cmdline-tools/9.0; do
+            SM=/usr/local/lib/android/sdk/$d/bin/sdkmanager
+            if [ -f "$SM" ]; then
+              sudo ln -sf "$SM" /usr/local/lib/android/sdk/tools/bin/sdkmanager
+              echo "Linked sdkmanager <- $d"
+              break
+            fi
+          done
+
+      # ---- Build --------------------------------------------------------------
+      - name: Build debug APK
+        run: buildozer -v android debug
+
+      # ---- Publish ------------------------------------------------------------
+      - name: Locate APK
         id: apk
         run: |
           set -e
           APK=$(find bin -maxdepth 1 -name '*.apk' | head -1)
           if [ -z "$APK" ]; then
             echo "::error::No APK produced in bin/"
+            ls -la bin || true
             exit 1
           fi
           echo "path=$APK" >> "$GITHUB_OUTPUT"
+          echo "Found: $APK"
+          ls -la "$APK"
 
-      - name: Upload APK Artifact
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: BeruAI-apk
           path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error
           retention-days: 30
+
+      - name: Attach APK to Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.apk.outputs.path }}
+          generate_release_notes: true
+
+      # ---- Diagnostics on failure --------------------------------------------
+      - name: Dump NDK state on failure
+        if: failure()
+        run: |
+          echo "=== preinstalled NDK listing ==="
+          ls -la "$ANDROID_NDK_HOME" 2>/dev/null || true
+          echo "=== any r28c leftovers ==="
+          ls -la "$HOME/.buildozer/android/platform/" 2>/dev/null | head || true
+          echo "=== bin/ ==="
+          ls -la bin 2>/dev/null || true
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BeruAI-build-logs
+          path: |
+            .buildozer/**/*.log
+          if-no-files-found: ignore
+          retention-days: 7
