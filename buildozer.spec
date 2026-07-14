@@ -40,10 +40,9 @@ android.wakelock = True
 include = shadow_memory.json
 
 # Build engine ---------------------------------------------------------------
-# p4a.branch = develop (latest docs recommend this for newer Android API/NDK).
-# 'master' auto-fetches NDK r28c (extract fails). Empty crashes git clone.
-# 'develop' is the actively maintained branch with modern NDK support.
-p4a.branch = develop
+# p4a.branch = master (the only well-tested branch for Kivy 2.3.0).
+# Workflow pre-downloads and validates the NDK before buildozer runs.
+p4a.branch = master
 
 # Logging / build verbosity ----------------------------------------------------
 log_level = 2

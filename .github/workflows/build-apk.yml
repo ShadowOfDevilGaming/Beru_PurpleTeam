@@ -1,5 +1,8 @@
 # Build the Beru AI debug APK.
-# First build downloads the NDK (~2 GB, ~20 min). Subsequent builds cache it.
+# Strategy: p4a master + Kivy 2.3.0 (the tested combo). We pre-download and
+# VERIFY the NDK before buildozer runs, so the corrupt-zip failure that broke
+# every previous run can't happen. Cache key bumps to v3 to discard the old
+# corrupt cache.
 
 name: Build Android APK
 
@@ -41,7 +44,7 @@ jobs:
             autoconf automake libtool pkg-config \
             zlib1g-dev libncurses5-dev libncursesw5-dev \
             libffi-dev libssl-dev \
-            build-essential ccache git unzip \
+            build-essential ccache git unzip wget \
             openjdk-17-jdk
 
       - name: Install buildozer
@@ -53,22 +56,77 @@ jobs:
       - name: Accept Android SDK licenses
         run: yes | buildozer android accept_sdk_license || true
 
-      # Cache buildozer's global store (SDK + NDK it downloads).
-      # The NDK is ~2 GB — caching avoids re-downloading on every run.
+      # Cache buildozer's global store. Key bumped to v3 to discard the v2
+      # cache that held a corrupt NDK r28c zip (unzip error 9).
       - name: Cache buildozer global store
         uses: actions/cache@v4
         with:
           path: ~/.buildozer
-          key: buildozer-global-v2
+          key: buildozer-global-v3
 
-      # Cache per-project compiled output (recipes, distributions).
       - name: Cache project .buildozer
         uses: actions/cache@v4
         with:
           path: .buildozer
-          key: buildozer-proj-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}-v2
+          key: buildozer-proj-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}-v3
           restore-keys: |
             buildozer-proj-${{ runner.os }}-
+
+      # ---- Pre-download + verify NDK r28c -----------------------------------
+      # p4a master fetches android-ndk-r28c. Its download corrupts on the
+      # runner (unzip error 9 / broken pipe). We download it ourselves with
+      # retries, verify the zip integrity, and extract it to where buildozer
+      # expects it — so p4a finds a valid NDK and skips the download entirely.
+      - name: Pre-download and verify NDK r28c
+        run: |
+          set -e
+          NDK_NAME="android-ndk-r28c"
+          NDK_ZIP="$NDK_NAME-linux.zip"
+          NDK_DIR="$HOME/.buildozer/android/platform/$NDK_NAME"
+          PLATFORM_DIR="$HOME/.buildozer/android/platform"
+
+          # If already extracted and valid, skip.
+          if [ -x "$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" ]; then
+            echo "NDK r28c already present and valid — skipping download."
+            exit 0
+          fi
+
+          mkdir -p "$PLATFORM_DIR"
+          cd "$PLATFORM_DIR"
+
+          # Download with retries. Google's CDN is fast and reliable.
+          URL="https://dl.google.com/android/repository/$NDK_ZIP"
+          echo "Downloading $URL ..."
+          wget -q --tries=5 --timeout=60 --continue -O "$NDK_ZIP" "$URL" || {
+            echo "::error::NDK download failed after 5 retries"
+            exit 1
+          }
+
+          # Verify zip integrity BEFORE extracting. This is the check that
+          # buildozer's own download skipped, causing error code 9.
+          echo "Verifying zip integrity..."
+          if ! unzip -tq "$NDK_ZIP" > /dev/null 2>&1; then
+            echo "::error::NDK zip is corrupt. Deleting and retrying once."
+            rm -f "$NDK_ZIP"
+            wget -q --tries=3 --timeout=60 -O "$NDK_ZIP" "$URL"
+            if ! unzip -tq "$NDK_ZIP" > /dev/null 2>&1; then
+              echo "::error::NDK zip still corrupt after retry. Aborting."
+              ls -la "$NDK_ZIP"
+              exit 1
+            fi
+          fi
+          echo "NDK zip verified OK."
+
+          # Extract (validated zip — can't fail with error 9 now).
+          echo "Extracting NDK..."
+          unzip -q "$NDK_ZIP"
+          echo "NDK extracted to: $NDK_DIR"
+
+          # Final sanity: clang must exist.
+          CLANG="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
+          test -x "$CLANG" || { echo "::error::NDK clang missing after extract"; exit 1; }
+          "$CLANG" --version | head -1
+          echo "NDK r28c ready."
 
       - name: Build debug APK
         run: buildozer -v android debug
@@ -80,9 +138,12 @@ jobs:
           APK=$(find bin -maxdepth 1 -name '*.apk' | head -1)
           if [ -z "$APK" ]; then
             echo "::error::No APK produced in bin/"
+            ls -la bin || true
             exit 1
           fi
           echo "path=$APK" >> "$GITHUB_OUTPUT"
+          echo "Found: $APK"
+          ls -la "$APK"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -98,3 +159,14 @@ jobs:
         with:
           files: ${{ steps.apk.outputs.path }}
           generate_release_notes: true
+
+      # ---- Diagnostics on failure ------------------------------------------
+      - name: Dump build state on failure
+        if: failure()
+        run: |
+          echo "=== NDK state ==="
+          ls -la "$HOME/.buildozer/android/platform/" 2>/dev/null || true
+          echo "=== bin/ ==="
+          ls -la bin 2>/dev/null || true
+          echo "=== last 50 lines of any log ==="
+          find .buildozer -name '*.log' -exec tail -20 {} \; 2>/dev/null || true
