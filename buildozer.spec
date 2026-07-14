@@ -12,7 +12,11 @@ source.exts = py,kv,atlas,json
 version = 1.0.0
 
 # Requirements ----------------------------------------------------------------
-requirements = python3,kivy==2.3.0
+# Kivy from git source (NOT sdist): sdist ke pre-generated C files Python
+# 3.12+ ke saath incompatible hain (_PyList_Extend, _PyInterpreterState_GetConfig
+# errors). Git source Cython se C files regenerate karta hai target Python ke
+# liye. p4a master Python 3.13/3.14 build karta hai isliye yeh zaroori hai.
+requirements = python3, git+https://github.com/kivy/kivy.git@2.3.0
 
 # Orientation / fullscreen on Android ------------------------------------------
 orientation = portrait

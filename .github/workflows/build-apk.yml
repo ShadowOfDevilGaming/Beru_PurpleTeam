@@ -50,25 +50,28 @@ jobs:
       - name: Install buildozer
         run: |
           python -m pip install --upgrade pip wheel
-          pip install "Cython==0.29.36"
+          # Cython 3.0+ zaroori: Kivy git source C files regenerate karta hai
+          # target Python (3.13/3.14) ke liye. Cython 0.29 only sdist ke
+          # pre-generated C files support karta hai (jo 3.12+ pe fail hote hain).
+          pip install "Cython>=3.0.0"
           pip install buildozer
 
       - name: Accept Android SDK licenses
         run: yes | buildozer android accept_sdk_license || true
 
-      # Cache buildozer's global store. Key bumped to v3 to discard the v2
-      # cache that held a corrupt NDK r28c zip (unzip error 9).
+      # Cache buildozer's global store. Key bumped to v4 to discard the v3
+      # cache that held the failed Kivy 2.3.0 sdist build.
       - name: Cache buildozer global store
         uses: actions/cache@v4
         with:
           path: ~/.buildozer
-          key: buildozer-global-v3
+          key: buildozer-global-v4
 
       - name: Cache project .buildozer
         uses: actions/cache@v4
         with:
           path: .buildozer
-          key: buildozer-proj-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}-v3
+          key: buildozer-proj-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}-v4
           restore-keys: |
             buildozer-proj-${{ runner.os }}-
 
