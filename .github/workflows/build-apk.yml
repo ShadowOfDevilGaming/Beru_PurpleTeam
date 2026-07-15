@@ -50,28 +50,32 @@ jobs:
       - name: Install buildozer
         run: |
           python -m pip install --upgrade pip wheel
-          # Cython 3.0+ zaroori: Kivy git source C files regenerate karta hai
-          # target Python (3.13/3.14) ke liye. Cython 0.29 only sdist ke
-          # pre-generated C files support karta hai (jo 3.12+ pe fail hote hain).
-          pip install "Cython>=3.0.0"
           pip install buildozer
+          # CRITICAL: buildozer 1.6.0 pulls cython<3.0 (0.29.37). Lekin p4a
+          # master Python 3.13 build karta hai, aur Kivy ki .pyx files ko
+          # regenerate karne ke liye Cython 3.0+ chahiye (warna stale .c files
+          # Py3.11 API use karti hain -> compile fail). buildozer ke baad
+          # Cython 3.0 ko force-reinstall karo. buildozer runtime pe version
+          # check nahi karta, sirf cython binary use karta hai.
+          pip install --force-reinstall --no-deps "Cython>=3.0.0"
+          cython --version
 
       - name: Accept Android SDK licenses
         run: yes | buildozer android accept_sdk_license || true
 
-      # Cache buildozer's global store. Key bumped to v4 to discard the v3
-      # cache that held the failed Kivy 2.3.0 sdist build.
+      # Cache buildozer's global store. Key bumped to v5 to discard the v4
+      # cache that held the failed Kivy sdist build (Cython 0.29 stale C files).
       - name: Cache buildozer global store
         uses: actions/cache@v4
         with:
           path: ~/.buildozer
-          key: buildozer-global-v4
+          key: buildozer-global-v5
 
       - name: Cache project .buildozer
         uses: actions/cache@v4
         with:
           path: .buildozer
-          key: buildozer-proj-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}-v4
+          key: buildozer-proj-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}-v5
           restore-keys: |
             buildozer-proj-${{ runner.os }}-
 
