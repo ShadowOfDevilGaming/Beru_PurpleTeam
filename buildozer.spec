@@ -12,11 +12,11 @@ source.exts = py,kv,atlas,json
 version = 1.0.0
 
 # Requirements ----------------------------------------------------------------
-# Kivy from git source (tag 2.3.0): p4a develop Python 3.13 build karta hai.
-# Kivy 2.3.0 sdist ke pre-generated C files Py3.13 ke saath incompatible hain
-# (_PyList_Extend etc). Git source se Cython 3.0 C files regenerate karta hai
-# target Python ke liye. Yeh combination p4a develop ke saath tested hai.
-requirements = python3, git+https://github.com/kivy/kivy.git@2.3.0
+# Kivy 2.3.0 sdist (PyPI). p4a v2024.01.21 Python 3.11 build karta hai, aur
+# Kivy 2.3.0 ke pre-generated C files exactly Python 3.11 ke liye bane hain.
+# Perfect match — no Cython regeneration needed. Cython 0.29 (buildozer default)
+# works fine here.
+requirements = python3, kivy==2.3.0
 
 # Orientation / fullscreen on Android ------------------------------------------
 orientation = portrait
@@ -44,9 +44,10 @@ android.wakelock = True
 include = shadow_memory.json
 
 # Build engine ---------------------------------------------------------------
-# p4a.branch = master (the only well-tested branch for Kivy 2.3.0).
-# Workflow pre-downloads and validates the NDK before buildozer runs.
-p4a.branch = master
+# p4a.branch = v2024.01.21: stable release jo Python 3.11 build karta hai.
+# Python 3.11 = Kivy 2.3.0 sdist ke C files ke saath perfect match.
+# master/develop Python 3.13/3.14 build karte hain (C files incompatible).
+p4a.branch = v2024.01.21
 
 # Logging / build verbosity ----------------------------------------------------
 log_level = 2

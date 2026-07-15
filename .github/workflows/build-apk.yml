@@ -50,14 +50,9 @@ jobs:
       - name: Install buildozer
         run: |
           python -m pip install --upgrade pip wheel
+          # buildozer 1.6.0 pulls cython<3.0 (0.29.x) — exactly what we want.
+          # p4a v2024.01.21 + Python 3.11 + Kivy 2.3.0 sdist: Cython 0.29 perfect.
           pip install buildozer
-          # CRITICAL: buildozer 1.6.0 pulls cython<3.0 (0.29.37). Lekin p4a
-          # master Python 3.13 build karta hai, aur Kivy ki .pyx files ko
-          # regenerate karne ke liye Cython 3.0+ chahiye (warna stale .c files
-          # Py3.11 API use karti hain -> compile fail). buildozer ke baad
-          # Cython 3.0 ko force-reinstall karo. buildozer runtime pe version
-          # check nahi karta, sirf cython binary use karta hai.
-          pip install --force-reinstall --no-deps "Cython>=3.0.0"
           cython --version
 
       - name: Accept Android SDK licenses
