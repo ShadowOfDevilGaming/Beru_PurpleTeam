@@ -12,8 +12,8 @@ source.exts = py,kv,atlas,json
 version = 1.0.0
 
 # Requirements ----------------------------------------------------------------
-# Patched by Devil: Added openrouter_client to ensure it doesn't crash on startup!
-requirements = python3, kivy==2.3.0, openrouter_client
+# Pinned to master recipes for modern pip requirements compilation trace
+requirements = python3, kivy, openrouter_client
 
 # Orientation / fullscreen on Android ------------------------------------------
 orientation = portrait
@@ -38,7 +38,8 @@ android.wakelock = True
 include = shadow_memory.json
 
 # Build engine ---------------------------------------------------------------
-p4a.branch = v2024.01.21
+# Patched: Shifted to master to allow pythonforandroid to bundle modern pip requirements seamlessly
+p4a.branch = master
 
 # --- FIXED SYSTEM PRE-INSTALLED NDK TARGET LINKS BY SHADOW MASTER ---
 android.ndk = 27.3.13750724
