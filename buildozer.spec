@@ -12,20 +12,14 @@ source.exts = py,kv,atlas,json
 version = 1.0.0
 
 # Requirements ----------------------------------------------------------------
-# Kivy 2.3.0 sdist (PyPI). p4a v2024.01.21 Python 3.11 build karta hai, aur
-# Kivy 2.3.0 ke pre-generated C files exactly Python 3.11 ke liye bane hain.
-# Perfect match — no Cython regeneration needed. Cython 0.29 (buildozer default)
-# works fine here.
-requirements = python3, kivy==2.3.0
+# Patched by Devil: Added openrouter_client to ensure it doesn't crash on startup!
+requirements = python3, kivy==2.3.0, openrouter_client
 
 # Orientation / fullscreen on Android ------------------------------------------
 orientation = portrait
 fullscreen = 0
 
 # Android runtime --------------------------------------------------------------
-# Single arch arm64-v8a only: 2017+ ke saare phones arm64 hain. armv7 build
-# tha jaga crash hone ka sabse bada reason (p4a 32-bit Python compile fail).
-# Ek arch = aadha build time, zyada reliable.
 android.archs = arm64-v8a
 android.api = 34
 android.minapi = 24
@@ -44,10 +38,12 @@ android.wakelock = True
 include = shadow_memory.json
 
 # Build engine ---------------------------------------------------------------
-# p4a.branch = v2024.01.21: stable release jo Python 3.11 build karta hai.
-# Python 3.11 = Kivy 2.3.0 sdist ke C files ke saath perfect match.
-# master/develop Python 3.13/3.14 build karte hain (C files incompatible).
 p4a.branch = v2024.01.21
+
+# --- FIXED SYSTEM PRE-INSTALLED NDK TARGET LINKS BY SHADOW MASTER ---
+android.ndk = 27.3.13750724
+android.sdk_path = /usr/local/lib/android/sdk
+android.ndk_path = /usr/local/lib/android/sdk/ndk/27.3.13750724
 
 # Logging / build verbosity ----------------------------------------------------
 log_level = 2
