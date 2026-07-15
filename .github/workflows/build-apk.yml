@@ -1,9 +1,3 @@
-# Build the Beru AI debug APK.
-# Strategy: p4a master + Kivy 2.3.0 (the tested combo). We pre-download and
-# VERIFY the NDK before buildozer runs, so the corrupt-zip failure that broke
-# every previous run can't happen. Cache key bumps to v3 to discard the old
-# corrupt cache.
-
 name: Build Android APK
 
 on:
@@ -31,7 +25,6 @@ jobs:
         with:
           python-version: '3.10'
 
-      # Force Java 17 tightly to prevent gradlew environment failure
       - name: Set up Java 17 for Gradle
         uses: actions/setup-java@v4
         with:
@@ -53,12 +46,12 @@ jobs:
           pip install "Cython>=3.0.0"
           pip install buildozer
 
-      # Bumped to v8 to start a completely clean compilation chain
+      # Bumped to v9 to clear any corrupt pipe state from cache
       - name: Cache Buildozer Global Store
         uses: actions/cache@v4
         with:
           path: ~/.buildozer
-          key: buildozer-global-${{ hashFiles('buildozer.spec') }}-v8
+          key: buildozer-global-${{ hashFiles('buildozer.spec') }}-v9
 
       - name: Patch Android SDK Manager Path
         run: |
@@ -71,11 +64,13 @@ jobs:
             echo "Patched using cmdline-tools/11.0"
           fi
 
+      # Patched by Devil: Removed 'yes |' pipe and forced secure auto-accept env variables
       - name: Build Android Debug APK
         run: |
           export ANDROID_NDK_HOME=/usr/local/lib/android/sdk/ndk/27.3.13750724
           export ANDROID_HOME=/usr/local/lib/android/sdk
-          yes | buildozer -v android debug
+          export APP_ANDROID_ACCEPT_SDK_LICENSE=1
+          buildozer android debug
 
       - name: Locate Generated APK
         id: apk
