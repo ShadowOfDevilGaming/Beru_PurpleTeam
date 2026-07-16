@@ -7,20 +7,21 @@ package.domain = ai.beru
 
 # Source code & entry point ----------------------------------------------------
 source.dir = .
-source.exts = py,kv,atlas,json
+source.include_exts = py,kv,atlas,json
 
 version = 1.0.0
 
 # Requirements ----------------------------------------------------------------
-# Patched: Removed openrouter_client from external pip fetch to prevent toolchain crash.
-# local scripts are automatically bundled via source.dir = .
-requirements = python3, kivy
+# Pinned to stable python3 and kivy version to ensure compatibility.
+# Local modules like openrouter_client.py are bundled automatically via include_exts.
+requirements = python3, kivy==2.3.0
 
 # Orientation / fullscreen on Android ------------------------------------------
 orientation = portrait
 fullscreen = 0
 
 # Android runtime --------------------------------------------------------------
+# Single arch arm64-v8a to ensure maximum stability and clean compilation.
 android.archs = arm64-v8a
 android.api = 34
 android.minapi = 24
