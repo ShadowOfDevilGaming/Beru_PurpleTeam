@@ -1,25 +1,3 @@
-"""
-openrouter_client.py
-====================
-Backend network communication handler for Beru AI.
-
-Responsibilities
-----------------
-* Talk to the OpenRouter REST gateway (default endpoint:
-  ``https://openrouter.ai/api/v1``).
-* Default to uncensored open-source modules such as
-  ``cognitivecomputations/dolphin-mixtral-8x7b``.
-* Manage authorization with standard ``Authorization: Bearer <token>``
-  headers.
-* Allow the API key to be swapped at runtime, thread-safely, so that
-  requests dispatched afterwards pick up the new credential immediately --
-  with no application re-initialization.
-
-The client uses only the Python standard library (``urllib``) so it has no
-extra pip dependency on-device, and dispatches work off the UI thread via a
-``ThreadPoolExecutor``.
-"""
-
 from __future__ import annotations
 
 import json
@@ -30,49 +8,24 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional
 
-# ---------------------------------------------------------------------------
-# Defaults -- the OpenRouter gateway and an uncensored open-source model.
-# ---------------------------------------------------------------------------
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_MODEL = "cognitivecomputations/dolphin-mixtral-8x7b"
 DEFAULT_TIMEOUT = 30.0
 USER_AGENT = "BeruAI/1.0 (+https://openrouter.ai)"
 
-
-# ---------------------------------------------------------------------------
-# Errors
-# ---------------------------------------------------------------------------
 class OpenRouterError(RuntimeError):
-    """Base error for every OpenRouter client failure."""
-
     def __init__(self, message: str, status: Optional[int] = None, body: str = ""):
         super().__init__(message)
         self.status = status
         self.body = body
 
-
 class AuthenticationError(OpenRouterError):
-    """Raised when the gateway rejects the Bearer token (HTTP 401/403)."""
-
+    pass
 
 class RateLimitError(OpenRouterError):
-    """Raised when the gateway rate-limits the client (HTTP 429)."""
+    pass
 
-
-# ---------------------------------------------------------------------------
-# Client
-# ---------------------------------------------------------------------------
 class OpenRouterClient:
-    """Thread-safe client for the OpenRouter API.
-
-    The instance is intentionally long-lived: every screen in Beru AI holds a
-    reference to the *same* object. Calling :meth:`set_api_key` swaps the
-    credential atomically under the same lock that request dispatch acquires,
-    so the next request started (even from another thread) observes the new
-    key with no restart required. A request already on the wire keeps the
-    credential it was dispatched with.
-    """
-
     def __init__(
         self,
         api_key: str = "",
@@ -90,14 +43,7 @@ class OpenRouterClient:
         self._last_error: Optional[str] = None
         self._last_status: Optional[int] = None
 
-    # ------------------------------------------------------------------ config
     def set_api_key(self, api_key: str) -> None:
-        """Swap the API key at runtime.
-
-        Thread-safe and immediate: the write is guarded by the same lock that
-        :meth:`_snapshot` reads under, so the next request dispatched (even one
-        waiting in another thread) will observe the new key.
-        """
         with self._lock:
             self._api_key = (api_key or "").strip()
 
@@ -144,10 +90,7 @@ class OpenRouterClient:
             return "*" * len(key)
         return key[:4] + "…" + key[-4:]
 
-    # ------------------------------------------------------------------ HTTP
     def _snapshot(self) -> Dict[str, str]:
-        """Capture the live config under the lock so a request observes a
-        consistent ``(key, model, base_url)`` tuple at dispatch time."""
         with self._lock:
             return {
                 "api_key": self._api_key,
@@ -160,7 +103,6 @@ class OpenRouterClient:
             "User-Agent": USER_AGENT,
             "Content-Type": "application/json",
             "Accept": "application/json",
-            # OpenRouter ranking headers (optional) -- improve routing.
             "HTTP-Referer": "https://beru.ai/app",
             "X-Title": "Beru AI",
         }
@@ -209,11 +151,7 @@ class OpenRouterClient:
                 pass
             self._record_error(exc.code, text)
             if exc.code in (401, 403):
-                raise AuthenticationError(
-                    f"Authorization rejected ({exc.code}). Verify the API key.",
-                    exc.code,
-                    text,
-                )
+                raise AuthenticationError(f"Authorization rejected ({exc.code}). Verify the API key.", exc.code, text)
             if exc.code == 429:
                 raise RateLimitError("Rate limited by the gateway.", exc.code, text)
             raise OpenRouterError(f"HTTP {exc.code} from {url}", exc.code, text)
@@ -230,9 +168,7 @@ class OpenRouterClient:
             self._last_status = status
             self._last_error = message
 
-    # ------------------------------------------------------------------ API
     def list_models(self) -> List[Dict[str, Any]]:
-        """Return the model catalogue visible to the current key."""
         snap = self._snapshot()
         data = self._request("GET", "/models", snap)
         if isinstance(data, dict) and "data" in data:
@@ -247,7 +183,6 @@ class OpenRouterClient:
         max_tokens: Optional[int] = None,
         extra: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Synchronous chat completion. ``model`` falls back to the live default."""
         snap = self._snapshot()
         payload: Dict[str, Any] = {
             "model": model or snap["model"],
@@ -260,8 +195,9 @@ class OpenRouterClient:
             payload.update(extra)
         return self._request("POST", "/chat/completions", snap, payload)
 
+    # --- ADDED MISSING EXPLICIT FUNCTION FOR MAIN INTENT LINKING ---
     def complete(self, prompt: str, system: Optional[str] = None, **kwargs: Any) -> str:
-        """Convenience: send a single prompt, return the assistant text."""
+        """Convenience function mapped strictly by main.py pipeline routines"""
         messages: List[Dict[str, str]] = []
         if system:
             messages.append({"role": "system", "content": system})
@@ -273,23 +209,16 @@ class OpenRouterClient:
             return ""
 
     def verify(self) -> bool:
-        """Lightweight round-trip against the models endpoint to validate the key."""
         snap = self._snapshot()
         self._request("GET", "/models", snap)
         return True
 
-    # ------------------------------------------------------------- async API
     def chat_async(
         self,
         messages: List[Dict[str, str]],
         callback: Callable[[Any, Optional[Exception]], None],
         **kwargs: Any,
     ) -> None:
-        """Run a chat completion off the UI thread.
-
-        ``callback(result, error)`` is invoked on a worker thread -- UI callers
-        must marshal back to the main thread themselves (e.g. via ``Clock``).
-        """
         snap = self._snapshot()
 
         def _work() -> None:
@@ -305,7 +234,7 @@ class OpenRouterClient:
                     payload.update(kwargs)
                 result = self._request("POST", "/chat/completions", snap, payload)
                 callback(result, None)
-            except Exception as exc:  # noqa: BLE001 -- surface to caller
+            except Exception as exc:
                 callback(None, exc)
 
         self._executor.submit(_work)
@@ -315,22 +244,19 @@ class OpenRouterClient:
         work: Callable[[], Any],
         callback: Callable[[Any, Optional[Exception]], None],
     ) -> None:
-        """Generic helper: run ``work()`` on a worker thread, then ``callback``."""
-        # touch the lock so the snapshot ordering is explicit
         self._snapshot()
 
         def _wrap() -> None:
             try:
                 result = work()
                 callback(result, None)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 callback(None, exc)
 
         self._executor.submit(_wrap)
 
     def shutdown(self) -> None:
         self._executor.shutdown(wait=False)
-
 
 __all__ = [
     "DEFAULT_BASE_URL",
