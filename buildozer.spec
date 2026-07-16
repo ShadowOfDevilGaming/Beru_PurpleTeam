@@ -12,8 +12,9 @@ source.exts = py,kv,atlas,json
 version = 1.0.0
 
 # Requirements ----------------------------------------------------------------
-# Pinned to master recipes for modern pip requirements compilation trace
-requirements = python3, kivy, openrouter_client
+# Patched: Removed openrouter_client from external pip fetch to prevent toolchain crash.
+# local scripts are automatically bundled via source.dir = .
+requirements = python3, kivy
 
 # Orientation / fullscreen on Android ------------------------------------------
 orientation = portrait
@@ -38,7 +39,6 @@ android.wakelock = True
 include = shadow_memory.json
 
 # Build engine ---------------------------------------------------------------
-# Patched: Shifted to master to allow pythonforandroid to bundle modern pip requirements seamlessly
 p4a.branch = master
 
 # --- FIXED SYSTEM PRE-INSTALLED NDK TARGET LINKS BY SHADOW MASTER ---
