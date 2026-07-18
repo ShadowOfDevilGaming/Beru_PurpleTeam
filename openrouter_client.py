@@ -195,9 +195,11 @@ class OpenRouterClient:
             payload.update(extra)
         return self._request("POST", "/chat/completions", snap, payload)
 
-    # --- ADDED MISSING EXPLICIT FUNCTION FOR MAIN INTENT LINKING ---
+    # =======================================================================
+    # 🎯 TARGET PATCH FIXED BY DEVIL: Injected structural wrapper complete method
+    # =======================================================================
     def complete(self, prompt: str, system: Optional[str] = None, **kwargs: Any) -> str:
-        """Convenience function mapped strictly by main.py pipeline routines"""
+        """Convenience method utilized by main.py ChatScreen pipelines"""
         messages: List[Dict[str, str]] = []
         if system:
             messages.append({"role": "system", "content": system})
