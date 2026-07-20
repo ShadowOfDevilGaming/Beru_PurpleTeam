@@ -235,7 +235,7 @@ class OpenRouterClient:
             except Exception as exc:
                 callback(None, exc)
 
-        # Patched by Devil: Fixed the broken equal syntax error here cleanly
+        # Patched cleanly by Devil: Fixed the broken equal syntax error here
         self._executor.submit(_work)
 
     def run_async(
