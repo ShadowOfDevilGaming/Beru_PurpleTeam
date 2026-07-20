@@ -195,11 +195,8 @@ class OpenRouterClient:
             payload.update(extra)
         return self._request("POST", "/chat/completions", snap, payload)
 
-    # =======================================================================
-    # 🎯 TARGET PATCH FIXED BY DEVIL: Injected structural wrapper complete method
-    # =======================================================================
+    # Added missing complete function required by main.py layout
     def complete(self, prompt: str, system: Optional[str] = None, **kwargs: Any) -> str:
-        """Convenience method utilized by main.py ChatScreen pipelines"""
         messages: List[Dict[str, str]] = []
         if system:
             messages.append({"role": "system", "content": system})
@@ -239,7 +236,7 @@ class OpenRouterClient:
             except Exception as exc:
                 callback(None, exc)
 
-        self._executor.submit(_work)
+        self._executor.submit(=_work)
 
     def run_async(
         self,
