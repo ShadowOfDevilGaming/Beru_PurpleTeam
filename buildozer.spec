@@ -12,8 +12,7 @@ source.include_exts = py,kv,atlas,json
 version = 1.0.0
 
 # Requirements ----------------------------------------------------------------
-# Pinned to stable python3 and kivy version to ensure compatibility.
-# Local modules like openrouter_client.py are bundled automatically via include_exts.
+# Pinned to python3 and stable kivy only. Local wrappers are extracted via source.dir
 requirements = python3, kivy==2.3.0
 
 # Orientation / fullscreen on Android ------------------------------------------
@@ -21,7 +20,6 @@ orientation = portrait
 fullscreen = 0
 
 # Android runtime --------------------------------------------------------------
-# Single arch arm64-v8a to ensure maximum stability and clean compilation.
 android.archs = arm64-v8a
 android.api = 34
 android.minapi = 24

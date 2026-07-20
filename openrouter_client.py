@@ -195,6 +195,7 @@ class OpenRouterClient:
             payload.update(extra)
         return self._request("POST", "/chat/completions", snap, payload)
 
+    # Added explicit complete wrapper method to guarantee attribute alignment with main.py
     def complete(self, prompt: str, system: Optional[str] = None, **kwargs: Any) -> str:
         messages: List[Dict[str, str]] = []
         if system:
@@ -235,7 +236,6 @@ class OpenRouterClient:
             except Exception as exc:
                 callback(None, exc)
 
-        # Patched cleanly by Devil: Fixed the broken equal syntax error here
         self._executor.submit(_work)
 
     def run_async(
