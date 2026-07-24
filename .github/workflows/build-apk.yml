@@ -38,42 +38,101 @@ jobs:
             autoconf automake libtool pkg-config \
             zlib1g-dev libncurses5-dev libncursesw5-dev \
             libffi-dev libssl-dev \
-            build-essential ccache git unzip
+            build-essential ccache git unzip wget
 
-      - name: Install Buildozer and Modern Cython
+      - name: Install buildozer
         run: |
           python -m pip install --upgrade pip wheel setuptools
-          pip install "Cython>=3.0.0"
+          # buildozer 1.6.0 pulls cython<3.0 (0.29.x). p4a v2024.01.21 Python
+          # 3.11 build karta hai, aur Kivy 2.3.0 sdist ke pre-generated C files
+          # Python 3.11 ke liye bane hain -> Cython 0.29 perfect. No force needed.
           pip install buildozer
+          cython --version
 
-      # Bumped to v9 to clear any corrupt pipe state from cache
-      - name: Cache Buildozer Global Store
+      - name: Accept Android SDK licenses
+        run: yes | buildozer android accept_sdk_license || true
+
+      # Cache buildozer's global store. Key bumped to v10 to discard all earlier
+      # caches (held failed p4a master / corrupt NDK state).
+      - name: Cache buildozer global store
         uses: actions/cache@v4
         with:
           path: ~/.buildozer
-          key: buildozer-global-${{ hashFiles('buildozer.spec') }}-v9
+          key: buildozer-global-v10
 
-      - name: Patch Android SDK Manager Path
+      - name: Cache project .buildozer
+        uses: actions/cache@v4
+        with:
+          path: .buildozer
+          key: buildozer-proj-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}-v10
+          restore-keys: |
+            buildozer-proj-${{ runner.os }}-
+
+      # CRITICAL: Pre-download + verify NDK r28c BEFORE buildozer runs.
+      # p4a v2024.01.21 recommends NDK r28c. Bina verification ke download kabhi
+      # corrupt hota tha (unzip error code 9 / broken pipe). Yeh step pehle se
+      # proven working hai (build #10 onwards).
+      - name: Pre-download and verify NDK r28c
         run: |
-          sudo mkdir -p /usr/local/lib/android/sdk/tools/bin
-          if [ -f "/usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager" ]; then
-            sudo ln -sf /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager /usr/local/lib/android/sdk/tools/bin/sdkmanager
-            echo "Patched using cmdline-tools/latest"
-          elif [ -f "/usr/local/lib/android/sdk/cmdline-tools/11.0/bin/sdkmanager" ]; then
-            sudo ln -sf /usr/local/lib/android/sdk/cmdline-tools/11.0/bin/sdkmanager /usr/local/lib/android/sdk/tools/bin/sdkmanager
-            echo "Patched using cmdline-tools/11.0"
+          set -e
+          NDK_NAME="android-ndk-r28c"
+          NDK_ZIP="$NDK_NAME-linux.zip"
+          NDK_DIR="$HOME/.buildozer/android/platform/$NDK_NAME"
+          PLATFORM_DIR="$HOME/.buildozer/android/platform"
+
+          if [ -x "$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" ]; then
+            echo "NDK r28c already present and valid — skipping download."
+            exit 0
           fi
 
-      # Patched by Devil: Removed 'yes |' pipe and forced secure auto-accept env variables
+          mkdir -p "$PLATFORM_DIR"
+          cd "$PLATFORM_DIR"
+
+          URL="https://dl.google.com/android/repository/$NDK_ZIP"
+          echo "Downloading $URL ..."
+          wget -q --tries=5 --timeout=60 --continue -O "$NDK_ZIP" "$URL" || {
+            echo "::error::NDK download failed after 5 retries"
+            exit 1
+          }
+
+          echo "Verifying zip integrity..."
+          if ! unzip -tq "$NDK_ZIP" > /dev/null 2>&1; then
+            echo "::error::NDK zip is corrupt. Deleting and retrying once."
+            rm -f "$NDK_ZIP"
+            wget -q --tries=3 --timeout=60 -O "$NDK_ZIP" "$URL"
+            if ! unzip -tq "$NDK_ZIP" > /dev/null 2>&1; then
+              echo "::error::NDK zip still corrupt after retry. Aborting."
+              ls -la "$NDK_ZIP"
+              exit 1
+            fi
+          fi
+          echo "NDK zip verified OK."
+
+          echo "Extracting NDK..."
+          unzip -q "$NDK_ZIP"
+          echo "NDK extracted to: $NDK_DIR"
+
+          CLANG="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
+          test -x "$CLANG" || { echo "::error::NDK clang missing after extract"; exit 1; }
+          "$CLANG" --version | head -1
+          echo "NDK r28c ready."
+
       - name: Build Android Debug APK
+        run: buildozer android debug
+
+      - name: Dump build state on failure
+        if: failure()
         run: |
-          export ANDROID_NDK_HOME=/usr/local/lib/android/sdk/ndk/27.3.13750724
-          export ANDROID_HOME=/usr/local/lib/android/sdk
-          export APP_ANDROID_ACCEPT_SDK_LICENSE=1
-          buildozer android debug
+          echo "=== NDK state ==="
+          ls -la "$HOME/.buildozer/android/platform/" 2>/dev/null || true
+          echo "=== bin/ ==="
+          ls -la bin 2>/dev/null || true
+          echo "=== last 50 lines of any log ==="
+          find .buildozer -name '*.log' -exec tail -20 {} \; 2>/dev/null || true
 
       - name: Locate Generated APK
         id: apk
+        if: success()
         run: |
           set -e
           APK=$(find bin -maxdepth 1 -name '*.apk' | head -1)
@@ -85,6 +144,7 @@ jobs:
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
+        if: success()
         with:
           name: BeruAI-apk
           path: ${{ steps.apk.outputs.path }}

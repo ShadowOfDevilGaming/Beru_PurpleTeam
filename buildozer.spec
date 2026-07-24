@@ -12,7 +12,10 @@ source.include_exts = py,kv,atlas,json
 version = 1.0.0
 
 # Requirements ----------------------------------------------------------------
-# Pinned to python3 and stable kivy only. Local wrappers are extracted via source.dir
+# Kivy 2.3.0 sdist: iske pre-generated C files Python 3.11 ke liye bane hain.
+# p4a v2024.01.21 bhi Python 3.11 build karta hai -> PERFECT MATCH.
+#   p4a master/develop -> Python 3.13/3.14 -> Kivy C files compile fail karte
+#   hain (_PyInterpreterState_GetConfig / _PyList_Extend undefined). 6 baar fail.
 requirements = python3, kivy==2.3.0
 
 # Orientation / fullscreen on Android ------------------------------------------
@@ -20,12 +23,18 @@ orientation = portrait
 fullscreen = 0
 
 # Android runtime --------------------------------------------------------------
+# arm64-v8a only: sab modern phones arm64 hain, build time aadha.
 android.archs = arm64-v8a
 android.api = 34
 android.minapi = 24
 android.accept_sdk_license = True
 
 # Permissions ------------------------------------------------------------------
+# INTERNET            -> OpenRouter HTTP traffic
+# RECORD_AUDIO        -> voice input / wake word
+# SYSTEM_ALERT_WINDOW -> floating overlay service
+# FOREGROUND_SERVICE  -> keeps overlay + audio loop alive in background
+# WAKE_LOCK           -> background polling stays scheduled
 android.permissions = INTERNET,RECORD_AUDIO,SYSTEM_ALERT_WINDOW,FOREGROUND_SERVICE,WAKE_LOCK
 
 # Foreground service: entry point run_overlay_service() defined in main.py
@@ -38,12 +47,14 @@ android.wakelock = True
 include = shadow_memory.json
 
 # Build engine ---------------------------------------------------------------
-p4a.branch = master
+# *** THE CRITICAL FIX ***
+# p4a.branch = v2024.01.21 -> Python 3.11 build karta hai (stable).
+# p4a master Python 3.13/3.14 build karta hai, jiske saath Kivy 2.3.0 ke
+# pre-generated C files incompatible hain (compile fail).
+p4a.branch = v2024.01.21
 
-# --- FIXED SYSTEM PRE-INSTALLED NDK TARGET LINKS BY SHADOW MASTER ---
-android.ndk = 27.3.13750724
-android.sdk_path = /usr/local/lib/android/sdk
-android.ndk_path = /usr/local/lib/android/sdk/ndk/27.3.13750724
+# NDK: do NOT pin here. Workflow pre-downloads + validates r28c (proven working
+# since build #10). p4a v2024.01.21 is NDK r28c ke saath compatible hai.
 
 # Logging / build verbosity ----------------------------------------------------
 log_level = 2
