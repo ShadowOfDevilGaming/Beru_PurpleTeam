@@ -9,7 +9,7 @@ package.domain = ai.beru
 source.dir = .
 source.include_exts = py,kv,atlas,json
 
-version = 1.0.0
+version = 1.0.1
 
 # Requirements ----------------------------------------------------------------
 # Kivy 2.3.0 sdist: iske pre-generated C files Python 3.11 ke liye bane hain.

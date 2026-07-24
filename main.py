@@ -31,9 +31,87 @@ import datetime as _dt
 import json
 import os
 import re
+import sys
 import threading
 import time
+import traceback
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+# ---------------------------------------------------------------------------
+# Crash guard: catch any unhandled exception in the main thread and write a
+# readable stack trace to /sdcard/BeruAI/crash.log so a black-screen crash on
+# Android can be diagnosed without logcat.  sys.excepthook is the Python main-
+# thread handler; Kivy's Clock also respects it for scheduled callbacks.
+# ---------------------------------------------------------------------------
+def _beru_install_crash_logger() -> None:
+    log_paths = []
+    # Prefer external storage (visible without root) on Android.
+    for env in ("EXTERNAL_STORAGE", "ANDROID_EXTERNAL_STORAGE", "SDCARD"):
+        base = os.environ.get(env)
+        if base:
+            log_paths.append(os.path.join(base, "BeruAI", "crash.log"))
+    # Fallback: app's writable dir / cwd.
+    try:
+        from kivy.app import App  # noqa: F401
+
+        # App user data dir is created by Kivy on first run.
+        log_paths.append("crash.log")
+        log_paths.append(os.path.join(os.getcwd(), "crash.log"))
+    except Exception:
+        log_paths.append("crash.log")
+
+    def _writer(exc_type, exc, tb):
+        msg = "".join(traceback.format_exception(exc_type, exc, tb))
+        stamp = _dt.datetime.now().isoformat(timespec="seconds")
+        for path in log_paths:
+            try:
+                os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+                with open(path, "a", encoding="utf-8") as fh:
+                    fh.write(f"\n===== BeruAI crash {stamp} =====\n{msg}\n")
+                break
+            except Exception:
+                continue
+
+    sys.excepthook = _writer
+    # Mirror stderr writes too, so print()s before a hard crash are captured.
+    try:
+        sys.stderr = _TeeStream(sys.stderr, log_paths)
+    except Exception:
+        pass
+
+
+class _TeeStream:
+    """Writes to both the original stderr and a rolling crash log."""
+
+    def __init__(self, original, paths):
+        self._original = original
+        self._paths = paths
+
+    def write(self, data):
+        try:
+            self._original.write(data)
+        except Exception:
+            pass
+        if not data or data.isspace():
+            return
+        stamp = _dt.datetime.now().isoformat(timespec="seconds")
+        for path in self._paths:
+            try:
+                os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+                with open(path, "a", encoding="utf-8") as fh:
+                    fh.write(f"[{stamp}] {data}")
+                break
+            except Exception:
+                continue
+
+    def flush(self):
+        try:
+            self._original.flush()
+        except Exception:
+            pass
+
+
+_beru_install_crash_logger()
 
 from kivy.app import App
 from kivy.clock import Clock
@@ -923,9 +1001,15 @@ class VoiceOutput:
         self._tts = None
         self._ready = False
         self._error: Optional[str] = None
-        self._init_engine()
+        self._init_attempted = False
+        # NOTE: Do NOT init the Java TextToSpeech engine here. Building it at
+        # app startup crashes on some Android versions (esp. Android 16/API 36)
+        # before the activity is fully ready. We lazily init on first speak().
 
     def _init_engine(self):
+        if self._init_attempted:
+            return
+        self._init_attempted = True
         try:
             from jnius import autoclass  # type: ignore
 
@@ -946,11 +1030,19 @@ class VoiceOutput:
 
     @property
     def available(self) -> bool:
+        if not self._ready:
+            self._init_engine()
         return self._ready and self._tts is not None
 
     def speak(self, text: str) -> None:
         """Speak ``text`` aloud if TTS is enabled and available."""
-        if not self.enabled or not self.available:
+        if not self.enabled:
+            return
+        # Lazy-init on first real use, guarded so a TTS init failure can never
+        # crash the app (it just stays silent and shows the on-screen bubble).
+        if not self._ready:
+            self._init_engine()
+        if not (self._ready and self._tts is not None):
             return
         # Strip emoji & markup that the TTS engine would read literally.
         clean = re.sub(r"\[/?[bi]\]|\[color=[^\]]*\]|\[/color\]", "", text or "")
@@ -2098,18 +2190,30 @@ class BeruAIApp(App):
         if not getattr(self, "on_android", False):
             Window.size = (390, 844)
 
-        self.client = OpenRouterClient()
-        self.vault = ShadowMemoryVault()
-        self.auditor = PurpleTeamAuditor()
-        self.overlay = OverlayService(interval=5.0)
-        self.phone = PhoneController()
-        self.chat = OfflineChatEngine(self.vault, self.phone)
-        # Beru speaks its replies aloud (offline TTS).
-        self.voice = VoiceOutput()
-        # Wake-word: "Beru" bolne par hi sunna shuru karta hai.
-        self.wake_word = WakeWordEngine(
-            self.overlay.audio, on_wake=lambda text: self._on_wake(text)
+        # Build components defensively so a failure in any one does not black-
+        # screen the whole app. Each component degrades to a safe stub.
+        self.client = self._safe(lambda: OpenRouterClient(), "client", None)
+        self.vault = self._safe(lambda: ShadowMemoryVault(), "vault", None)
+        self.auditor = self._safe(lambda: PurpleTeamAuditor(), "auditor", None)
+        self.overlay = self._safe(lambda: OverlayService(interval=5.0), "overlay", None)
+        self.phone = self._safe(lambda: PhoneController(), "phone", None)
+        self.chat = self._safe(
+            lambda: OfflineChatEngine(self.vault, self.phone), "chat", None
         )
+        # Beru speaks its replies aloud (offline TTS). Lazy-init so the Java
+        # TextToSpeech object is never built during startup.
+        self.voice = self._safe(lambda: VoiceOutput(), "voice", None)
+        # Wake-word: "Beru" bolne par hi sunna shuru karta hai.
+        if self.overlay is not None:
+            self.wake_word = self._safe(
+                lambda: WakeWordEngine(
+                    self.overlay.audio, on_wake=lambda text: self._on_wake(text)
+                ),
+                "wake_word",
+                None,
+            )
+        else:
+            self.wake_word = None
 
         self.sm = ScreenManager()
         self.dashboard = DashboardScreen(self, name="dashboard")
@@ -2129,6 +2233,20 @@ class BeruAIApp(App):
         # Periodic refresh of dashboard so live status/overlay info stays fresh.
         Clock.schedule_interval(self._tick, 2.0)
         return self.sm
+
+    @staticmethod
+    def _safe(factory, label, fallback=None):
+        """Run ``factory``; on any error log it and return ``fallback``.
+
+        This is the single point that keeps a component-level failure from
+        black-screening the whole app during build()/on_start().
+        """
+        try:
+            return factory()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[BeruAI] component '{label}' failed to init: {exc}")
+            traceback.print_exc()
+            return fallback
 
     def _on_wake(self, text: str) -> None:
         """Called (from the wake-word worker thread) when 'Beru' is heard.
@@ -2172,26 +2290,42 @@ class BeruAIApp(App):
     def on_start(self):
         """App open: start background overlay + wake-word listener.
 
-        Beru keeps running in the background (foreground service holds a
-        WAKE_LOCK on Android) and only listens when 'Beru' is spoken.
+        Deferred by 2s so the UI paints first (avoids startup contention on
+        Android 16). Each background component is started defensively; if one
+        fails the app keeps running.
         """
+        # Defer heavy/background startup until after the UI is rendered.
+        Clock.schedule_once(self._deferred_start, 2.0)
+
+    def _deferred_start(self, *_):
         try:
-            self.overlay.start()
-        except Exception:
-            pass
+            if self.overlay is not None:
+                self.overlay.start()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[BeruAI] overlay start failed: {exc}")
+            traceback.print_exc()
         try:
-            self.wake_word.start()
-        except Exception:
-            pass
+            if self.wake_word is not None:
+                self.wake_word.start()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[BeruAI] wake_word start failed: {exc}")
+            traceback.print_exc()
 
     def on_stop(self):
-        try:
-            self.wake_word.stop()
-            self.overlay.stop()
-            self.voice.stop()
-            self.client.shutdown()
-        except Exception:
-            pass
+        for comp, name in (
+            (getattr(self, "wake_word", None), "wake_word"),
+            (getattr(self, "overlay", None), "overlay"),
+            (getattr(self, "voice", None), "voice"),
+            (getattr(self, "client", None), "client"),
+        ):
+            try:
+                if comp is not None:
+                    if name == "client":
+                        comp.shutdown()
+                    else:
+                        comp.stop()
+            except Exception as exc:  # noqa: BLE001
+                print(f"[BeruAI] {name} stop failed: {exc}")
 
 
 # ===========================================================================
